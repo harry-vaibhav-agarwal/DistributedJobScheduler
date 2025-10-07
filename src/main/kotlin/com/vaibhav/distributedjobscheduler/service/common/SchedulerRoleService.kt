@@ -19,7 +19,6 @@ class SchedulerRoleService(
     private val masterService: MasterService
 ) {
 
-    // Flags to track the current active role and ensure only one is running at a time.
     private val isMaster = AtomicBoolean(false)
     private var roleFuture: ScheduledFuture<*>? = null
 
@@ -41,8 +40,6 @@ class SchedulerRoleService(
             val currentMasterId = redisTemplate.opsForValue().get(SCHEDULER_MASTER_KEY)
 
             if (currentMasterId == INSTANCE_ID) {
-                // Case A: I am the current Master. Renew the lock's expiry time.
-                // Note: We use expire() which is fast and ensures we don't accidentally overwrite the key value.
                 val renewed = redisTemplate.expire(
                     SCHEDULER_MASTER_KEY,
                     Duration.ofSeconds(LOCK_EXPIRY_TIMEOUT_IN_SECONDS)
@@ -95,7 +92,7 @@ class SchedulerRoleService(
             }
         }.onFailure { e ->
             log.error("Error during lock attempt. Transitioning to Worker for safety.", e)
-            if(isMaster.compareAndSet(true, false)) {
+            if (isMaster.compareAndSet(true, false)) {
                 log.info("Stop master and remain a worker")
                 masterService.stop()
             }
@@ -104,8 +101,7 @@ class SchedulerRoleService(
     }
 
     companion object {
-        private const val SCHEDULER_MASTER_KEY= "scheduler:master:lock"
-        // Increased expiry timeout relative to heartbeat for better stability.
+        private const val SCHEDULER_MASTER_KEY = "scheduler:master:lock"
         private const val LOCK_EXPIRY_TIMEOUT_IN_SECONDS = 30L
         private val INSTANCE_ID = UUID.randomUUID().toString()
         private const val HEARTBEAT_INTERVAL_SECONDS = 5L
