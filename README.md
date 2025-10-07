@@ -66,3 +66,9 @@ src/main/kotlin/com/yourcompany/scheduler
 └── SchedulerApplication.kt
 
 ```
+
+## Run locally
+
+```bash 
+docker-compose up -d
+```

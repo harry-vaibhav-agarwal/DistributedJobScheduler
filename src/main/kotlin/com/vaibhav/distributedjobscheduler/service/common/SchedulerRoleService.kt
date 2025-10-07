@@ -26,75 +26,76 @@ class SchedulerRoleService(
         if (roleFuture == null || roleFuture!!.isDone) {
             log.info("Starting Master/Worker role determination heartbeat...")
             roleFuture = executor.scheduleAtFixedRate(
-                this::attemptAcquireLock, 0, // initial delay
+                this::determineCurrentRole, 0, // initial delay
                 HEARTBEAT_INTERVAL_SECONDS, TimeUnit.SECONDS
             )
         }
     }
 
-    private fun attemptAcquireLock() {
-        runCatching {
-            // 1. Check who currently holds the lock
+    private fun determineCurrentRole() {
+        try {
             val currentMasterId = redisTemplate.opsForValue().get(SCHEDULER_MASTER_KEY)
-
             if (currentMasterId == INSTANCE_ID) {
-                val renewed = redisTemplate.expire(
-                    SCHEDULER_MASTER_KEY, Duration.ofSeconds(LOCK_EXPIRY_TIMEOUT_IN_SECONDS)
-                )
-
-                if (renewed == true) {
-                    if (isMaster.compareAndSet(false, true)) {
-                        log.info("LEADERSHIP RENEWED AND ACTIVATED I am the master: $INSTANCE_ID")
-                        workerService.stop()
-                        masterService.start()
-                    } else {
-                        // Already running as master, just logging continuation (for stability)
-                        masterService.ensureRunning()
-                    }
-                } else if (isMaster.compareAndSet(true, false)) {
-                    log.warn("Failed to renew lock. Stepping down to worker: $INSTANCE_ID")
-                    masterService.stop()
-                    workerService.start()
-                } else {
-
-                }
-
+                renewMasterRole()
             } else {
-                // Case B: I am not the Master (either lock is held by someone else, or it expired). Attempt to acquire.
-                val acquired = redisTemplate.opsForValue().setIfAbsent(
-                    SCHEDULER_MASTER_KEY, INSTANCE_ID, Duration.ofSeconds(LOCK_EXPIRY_TIMEOUT_IN_SECONDS)
-                )
-
-                if (acquired == true) {
-                    // Successfully acquired the lock. Transition to Master.
-                    if (isMaster.compareAndSet(false, true)) {
-                        log.info("LEADERSHIP ACQUIRED I am the new master: $INSTANCE_ID")
-                        workerService.stop()
-                        masterService.start()
-                    } else {
-
-                    }
-                } else {
-                    // Lock held by someone else. Transition or continue as Worker.
-                    if (isMaster.compareAndSet(true, false)) {
-                        log.info("LEADERSHIP LOST I am the worker now: $INSTANCE_ID")
-                        masterService.stop()
-                        workerService.start()
-                    } else {
-                        log.info("Worker logic continue to run: $INSTANCE_ID")
-                        workerService.ensureRunning()
-                    }
-                }
+                attemptToAcquireMasterRole()
             }
-        }.onFailure { e ->
-            log.error("Error during lock attempt. Transitioning to Worker for safety.", e)
-            if (isMaster.compareAndSet(true, false)) {
-                log.info("Stop master and remain a worker")
-                masterService.stop()
-            }
-            workerService.start()
+        } catch (e: Exception) {
+            handleFailure(e)
         }
     }
+
+    private fun renewMasterRole() {
+        val renewed = redisTemplate.expire(SCHEDULER_MASTER_KEY, Duration.ofSeconds(LOCK_EXPIRY_TIMEOUT_IN_SECONDS))
+        if (renewed == true) {
+            if (isMaster.compareAndSet(false, true)) {
+                log.info("Renewed leadership as master: $INSTANCE_ID")
+                transitionToMaster()
+            } else {
+                masterService.ensureRunning()
+            }
+        } else {
+            transitionToWorker()
+        }
+    }
+
+    private fun attemptToAcquireMasterRole() {
+        val acquired = redisTemplate.opsForValue().setIfAbsent(
+            SCHEDULER_MASTER_KEY, INSTANCE_ID, Duration.ofSeconds(LOCK_EXPIRY_TIMEOUT_IN_SECONDS)
+        )
+        if (acquired == true) {
+            if (isMaster.compareAndSet(false, true)) {
+                log.info("Acquired leadership as master: $INSTANCE_ID")
+                transitionToMaster()
+            }
+        } else {
+            if (isMaster.compareAndSet(true, false)) {
+                log.info("Lost leadership, transitioning to worker: $INSTANCE_ID")
+                transitionToWorker()
+            } else {
+                workerService.ensureRunning()
+            }
+        }
+    }
+
+    private fun transitionToMaster() {
+        workerService.stop()
+        masterService.start()
+    }
+
+    private fun transitionToWorker() {
+        if (isMaster.compareAndSet(true, false)) {
+            log.warn("Stepping down to worker: $INSTANCE_ID")
+            masterService.stop()
+        }
+        workerService.start()
+    }
+
+    private fun handleFailure(e: Exception) {
+        log.error("Error during role determination, transitioning to worker.", e)
+        transitionToWorker()
+    }
+
 
     companion object {
         private const val SCHEDULER_MASTER_KEY = "scheduler:master:lock"

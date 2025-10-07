@@ -17,6 +17,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    image: my-scheduler-app:latest
     deploy:
       replicas: 3
       restart_policy:
