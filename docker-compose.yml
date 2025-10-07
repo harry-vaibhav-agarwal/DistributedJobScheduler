@@ -1,7 +1,19 @@
 version: '3.8'
 
 services:
-  # --- 1. Redis (For Leader Election) ----------------------------------------
+  # --- 1. Postgres for database -----------------------
+  postgres:
+    image: postgres:15.2
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: admin
+      POSTGRES_DB: scheduler_db
+    ports:
+        - "5432:5432"
+    volumes:
+      - 'postgres_data:/var/lib/postgresql/data'
+
+  # --- 2. Redis (For Leader Election) ----------------------------------------
   redis:
     image: redis:7.2-alpine
     hostname: redis # Set the network hostname
@@ -12,7 +24,7 @@ services:
       - 'redis_data:/data'
     restart: unless-stopped
 
-  # --- 2. Distributed Scheduler (The Kotlin/Spring Boot App) -------------------
+  # --- 3. Distributed Scheduler (The Kotlin/Spring Boot App) -------------------
   scheduler:
     build:
       context: .
@@ -24,9 +36,16 @@ services:
         condition: unless-stopped
     environment:
       SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATASOURCE_URL: "jdbc:postgresql://postgres:5432/scheduler_db"
+      SPRING_DATASOURCE_USERNAME: admin
+      SPRING_DATASOURCE_PASSWORD: admin
+      SPRING_JPA_HIBERNATE_DDL_AUTO: create
     # Ensure Redis is up before the application attempts to connect
     depends_on:
       - redis
+      - postgres
 volumes:
   redis_data:
+    driver: local
+  postgres_data:
     driver: local
