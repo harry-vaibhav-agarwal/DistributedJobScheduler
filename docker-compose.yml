@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  # --- 1. Redis (For Leader Election) ----------------------------------------
+  redis:
+    image: redis:7.2-alpine
+    hostname: redis # Set the network hostname
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - 'redis_data:/data'
+    restart: unless-stopped
+
+  # --- 2. Distributed Scheduler (The Kotlin/Spring Boot App) -------------------
+  scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    deploy:
+      replicas: 3
+      restart_policy:
+        condition: unless-stopped
+    environment:
+      SPRING_DATA_REDIS_HOST: redis
+    # Ensure Redis is up before the application attempts to connect
+    depends_on:
+      - redis
+volumes:
+  redis_data:
+    driver: local
