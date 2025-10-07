@@ -70,5 +70,6 @@ src/main/kotlin/com/yourcompany/scheduler
 ## Run locally
 
 ```bash 
-docker-compose up -d
+docker-compose -f docker-compose.yml -p job_scheduler up -d 
 ```
+
