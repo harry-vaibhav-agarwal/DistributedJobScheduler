@@ -26,10 +26,8 @@ class SchedulerRoleService(
         if (roleFuture == null || roleFuture!!.isDone) {
             log.info("Starting Master/Worker role determination heartbeat...")
             roleFuture = executor.scheduleAtFixedRate(
-                this::attemptAcquireLock,
-                0, // initial delay
-                HEARTBEAT_INTERVAL_SECONDS,
-                TimeUnit.SECONDS
+                this::attemptAcquireLock, 0, // initial delay
+                HEARTBEAT_INTERVAL_SECONDS, TimeUnit.SECONDS
             )
         }
     }
@@ -41,8 +39,7 @@ class SchedulerRoleService(
 
             if (currentMasterId == INSTANCE_ID) {
                 val renewed = redisTemplate.expire(
-                    SCHEDULER_MASTER_KEY,
-                    Duration.ofSeconds(LOCK_EXPIRY_TIMEOUT_IN_SECONDS)
+                    SCHEDULER_MASTER_KEY, Duration.ofSeconds(LOCK_EXPIRY_TIMEOUT_IN_SECONDS)
                 )
 
                 if (renewed == true) {
@@ -54,21 +51,18 @@ class SchedulerRoleService(
                         // Already running as master, just logging continuation (for stability)
                         masterService.ensureRunning()
                     }
+                } else if (isMaster.compareAndSet(true, false)) {
+                    log.warn("Failed to renew lock. Stepping down to worker: $INSTANCE_ID")
+                    masterService.stop()
+                    workerService.start()
                 } else {
-                    // Lock existed, but we failed to renew (e.g., Redis error). Transition to worker for safety.
-                    if (isMaster.compareAndSet(true, false)) {
-                        log.warn("Failed to renew lock. Stepping down to worker: $INSTANCE_ID")
-                        masterService.stop()
-                        workerService.start()
-                    }
+
                 }
 
             } else {
                 // Case B: I am not the Master (either lock is held by someone else, or it expired). Attempt to acquire.
                 val acquired = redisTemplate.opsForValue().setIfAbsent(
-                    SCHEDULER_MASTER_KEY,
-                    INSTANCE_ID,
-                    Duration.ofSeconds(LOCK_EXPIRY_TIMEOUT_IN_SECONDS)
+                    SCHEDULER_MASTER_KEY, INSTANCE_ID, Duration.ofSeconds(LOCK_EXPIRY_TIMEOUT_IN_SECONDS)
                 )
 
                 if (acquired == true) {
@@ -77,6 +71,8 @@ class SchedulerRoleService(
                         log.info("LEADERSHIP ACQUIRED I am the new master: $INSTANCE_ID")
                         workerService.stop()
                         masterService.start()
+                    } else {
+
                     }
                 } else {
                     // Lock held by someone else. Transition or continue as Worker.
